@@ -2,7 +2,7 @@ import numpy as np
 from ultralytics import YOLO
 import cv2
 import math
-from sort import *
+from sort import Sort
 from helper import create_video_writer
 
 cap = cv2.VideoCapture("videos/sample.mp4")  # For Video
@@ -92,8 +92,13 @@ while True:
 
     cv2.putText(img,f'Up: {len(totalCountUp)}',(480,40),cv2.FONT_HERSHEY_PLAIN,2,(139,195,75),3)
     cv2.putText(img, f'Down: {len(totalCountDown)}', (480,70), cv2.FONT_HERSHEY_PLAIN, 2, (50, 50, 230), 3)
+    if len(totalCountUp) > 3:
+        cv2.putText(img,f'OVERLOAD UP',(480,100),cv2.FONT_HERSHEY_PLAIN,2,(139,195,75),3)
+    if len(totalCountDown) > 3:
+        cv2.putText(img,f'OVERLOAD DOWN',(480,130),cv2.FONT_HERSHEY_PLAIN,2,(50, 50, 230),3)
+
     cv2.imshow("Video", img)
-    writer.write(img)
+    writer.write(img) 
     if cv2.waitKey(1) == ord("q"):
         break
 cap.release()
