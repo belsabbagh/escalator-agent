@@ -1,7 +1,9 @@
 import numpy as np
 from ultralytics import YOLO
 import cv2
+import threading
 import math
+import flask
 from sort import Sort
 from helper import create_video_writer
 
@@ -56,25 +58,25 @@ def make_ui_frame(img, frame_size, gate_closed):
 
 
 def escalator_controller(
-    stream, limits_in, limits_out, mask_in, mask_out, model, tracker, soft_limit
+    stream, config, model, tracker, max_count, soft_limit
 ):
     people = []
     gate_closed = False
     while stream.isOpened():
-        success, img = cap.read()
+        success, img = stream.read()
         if not success:
             break
-        results = count_people(img, mask, model, tracker)
-        draw_line(img, limits_in)
-        draw_line(img, limits_out)
+        results = count_people(img, config['mask'], model, tracker)
+        draw_line(img, config['limits_in'])
+        draw_line(img, config['limits_out'])
         for result in results:
             x1, y1, x2, y2, _id = result
             x1, y1, x2, y2 = int(x1), int(y1), int(x2), int(y2)
             w, h = x2 - x1, y2 - y1
             cx, cy = x1 + w // 2, y1 + h // 2
-            if is_in_limits(limits_in, cx, cy, 15) and people.count(_id) == 0:
+            if is_in_limits(config['limits_in'], cx, cy, 15) and people.count(_id) == 0:
                 people.append(_id)
-            if is_in_limits(limits_out, cx, cy, 15) and people.count(_id) == 1:
+            if is_in_limits(config['limits_out'], cx, cy, 15) and people.count(_id) == 1:
                 people.remove(_id)
             cv2.rectangle(img, (x1, y1), (x2, y2), (255, 0, 255), 3)
             cv2.circle(img, (cx, cy), 5, (255, 0, 255), cv2.FILLED)
@@ -96,15 +98,67 @@ def escalator_controller(
         if cv2.waitKey(1) == ord("q"):
             break
 
+def init_mask(stream):
+    ret, frame = stream.read()
+    if not ret:
+        return None
+    mask_shape = frame.shape
+    mask = np.full_like(mask_shape, 255, np.uint8)
+    return mask
 
-cap = cv2.VideoCapture("videos/sample.mp4")  # For Video
-model = YOLO("yolov8l.pt")
-mask = cv2.imread("Images/mask.png")
-tracker = Sort(max_age=60)
-limits_in = [70, 170, 160, 170]
-limits_out = [120, 60, 200, 60]
-max_count = 3
-soft_limit = 1
-escalator_controller(cap, limits_in, limits_out, mask, mask, model, tracker, soft_limit)
-cap.release()
-cv2.destroyAllWindows()
+def server(stream):
+    app = flask.Flask(__name__)
+    config = {
+        'limits_in': [70, 170, 160, 170],
+        'limits_out': [120, 60, 200, 60],
+        'mask': init_mask(stream)
+    }
+
+
+    def protector_server():
+        model = YOLO("yolov8l.pt")
+        tracker = Sort(max_age=60)
+
+        max_count = 3
+        soft_limit = 1
+        escalator_controller(stream, config, model, tracker, max_count, soft_limit)
+        stream.release()
+
+
+    @app.route("/frame", methods=["GET"])
+    def getFrameIn():
+        ret, frame = stream.read()
+        if not ret:
+            return flask.make_response("error")
+        ret, buffer = cv2.imencode(".png", frame)
+        if not ret:
+            return flask.make_response("error")
+        buffer = buffer.tobytes()
+        return flask.send_file(io.BytesIO(buffer), mimetype="image/png")
+
+    @app.route("/config", methods=["POST"])
+    def setMaskIn():
+        request = flask.request.get_json()
+        points = request["points"]
+        config['limits_in'] = [*request["line1Points"][0].values(), *request["line1Points"][1].values()]
+        config['limits_out'] = [*request["line2Points"][0].values(), *request["line2Points"][1].values()]
+        # get the current frame from the stream and get its shape, then draw the quad
+        ret, frame = stream.read()
+        if not ret:
+            return flask.make_response("error")
+        image = np.zeros(frame.shape, np.uint8)
+        cv2.fillPoly(image, np.int32([points]), (255, 255, 255))
+        config['mask'] = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        return flask.make_response("ok")
+
+
+    def start_server():
+        threading.Thread(target=protector_server).start()
+        app.run()
+
+    return start_server
+
+cap = cv2.VideoCapture("videos/sample.mp4")
+start = server(cap)
+
+start()
