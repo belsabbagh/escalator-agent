@@ -1,11 +1,13 @@
 import numpy as np
 from ultralytics import YOLO
 import cv2
+import sys
 import threading
 import math
 import flask
 from sort import Sort
-from helper import create_video_writer
+from PyQt6 import QtCore, QtGui, QtWidgets
+
 
 
 def is_in_limits(limits, cx, cy, k=15):
@@ -98,68 +100,81 @@ def escalator_controller(
         if cv2.waitKey(1) == ord("q"):
             break
 
-def init_mask(stream):
-    ret, frame = stream.read()
-    if not ret:
-        return None
-    mask_shape = frame.shape
-    mask = np.full_like(mask_shape, 255, np.uint8)
-    return mask
 
-def server():
+
+class DisplayImageWidget(QtWidgets.QWidget):
+    def __init__(self, image):
+        super(DisplayImageWidget, self).__init__()
+        self.image = image
+        self.points = []
+
+        self.convert = QtGui.QImage(self.image.data, self.image.shape[1], self.image.shape[0], self.image.strides[0], QtGui.QImage.Format.Format_BGR888)
+        self.frame = QtWidgets.QLabel()
+        self.pixmap = QtGui.QPixmap.fromImage(self.convert)
+        self.frame.setPixmap(self.pixmap)
+        self.resize(self.pixmap.width(), self.pixmap.height())
+        self.layout = QtWidgets.QHBoxLayout(self)
+        self.layout.addWidget(self.frame)
+
+        self.frame.mousePressEvent = self.get_pos
+
+    def get_pos(self, event):
+        if len(self.points) < 8:
+            x = event.pos().x() - self.pos().x()
+            y = event.pos().y() - self.pos().y()
+            self.points.append((x, y))
+            print(f"Point {len(self.points)}: ({x}, {y})")
+
+            # Draw the points on the image
+            painter = QtGui.QPainter(self.convert)
+            painter.setPen(QtGui.QPen(QtGui.QColor(255, 0, 0), 5))
+            painter.drawPoint(x, y)
+            painter.end()
+
+            self.frame.setPixmap(QtGui.QPixmap.fromImage(self.convert))
+
+        if len(self.points) == 8:
+            config = {}
+            print("All points selected:", self.points)
+            mask_points = np.array(self.points[:4])
+            mask = np.zeros(self.image.shape, np.uint8)
+            cv2.fillPoly(mask, np.int32([mask_points]), (255, 255, 255))
+            config['mask'] = mask
+            config['limits_in'] = np.array([*self.points[4], *self.points[5]])
+            config['limits_out'] = np.array([*self.points[6], *self.points[7]])
+            model = YOLO("yolov8l.pt")
+            tracker = Sort(max_age=60)
+
+            max_count = 3
+            soft_limit = 1
+            self.close()
+            escalator_controller(stream, config, model, tracker, max_count, soft_limit)
+
+            stream.release()
+            
+
+class MainWindow(QtWidgets.QMainWindow):
+    def __init__(self, image):
+        super().__init__()
+        self.setWindowTitle("Static Image with PyQt")
+        height, width, _ = image.shape
+        self.setGeometry(100, 100, width, height)
+        self.image_widget = DisplayImageWidget(image)
+        self.setCentralWidget(self.image_widget)
+
+
+
+if __name__ == "__main__":
+    app = QtWidgets.QApplication([])
+
+    # Capture a single frame from the video stream
     stream = cv2.VideoCapture("videos/sample.mp4")
-    app = flask.Flask(__name__)
-    config = {
-        'limits_in': [70, 170, 160, 170],
-        'limits_out': [120, 60, 200, 60],
-        'mask': init_mask(stream)
-    }
+    ret, frame = stream.read()
+    
+    if not ret:
+        print("Failed to capture image")
+        sys.exit(1)
 
-
-    def protector_server():
-        model = YOLO("yolov8l.pt")
-        tracker = Sort(max_age=60)
-
-        max_count = 3
-        soft_limit = 1
-        escalator_controller(stream, config, model, tracker, max_count, soft_limit)
-        stream.release()
-
-    threading.Thread(target=protector_server).start()
-
-    @app.route("/frame", methods=["GET"])
-    def getFrameIn():
-        ret, frame = stream.read()
-        if not ret:
-            return flask.make_response("error")
-        ret, buffer = cv2.imencode(".png", frame)
-        if not ret:
-            return flask.make_response("error")
-        buffer = buffer.tobytes()
-        return flask.send_file(io.BytesIO(buffer), mimetype="image/png")
-
-    @app.route("/config", methods=["POST"])
-    def setMaskIn():
-        request = flask.request.get_json()
-        points = request["points"]
-        config['limits_in'] = [*request["line1Points"][0].values(), *request["line1Points"][1].values()]
-        config['limits_out'] = [*request["line2Points"][0].values(), *request["line2Points"][1].values()]
-        # get the current frame from the stream and get its shape, then draw the quad
-        ret, frame = stream.read()
-        if not ret:
-            return flask.make_response("error")
-        image = np.zeros(frame.shape, np.uint8)
-        cv2.fillPoly(image, np.int32([points]), (255, 255, 255))
-        config['mask'] = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-        return flask.make_response("ok")
-
-
-    def start_server():
-        app.run()
-
-    return start_server
-
-# cap = cv2.VideoCapture("videos/sample.mp4")
-start = server()
-
-start()
+    main_window = MainWindow(frame)
+    main_window.show()
+    sys.exit(app.exec())
