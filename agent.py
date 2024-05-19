@@ -106,7 +106,8 @@ def init_mask(stream):
     mask = np.full_like(mask_shape, 255, np.uint8)
     return mask
 
-def server(stream):
+def server():
+    stream = cv2.VideoCapture("videos/sample.mp4")
     app = flask.Flask(__name__)
     config = {
         'limits_in': [70, 170, 160, 170],
@@ -124,6 +125,7 @@ def server(stream):
         escalator_controller(stream, config, model, tracker, max_count, soft_limit)
         stream.release()
 
+    threading.Thread(target=protector_server).start()
 
     @app.route("/frame", methods=["GET"])
     def getFrameIn():
@@ -153,12 +155,11 @@ def server(stream):
 
 
     def start_server():
-        threading.Thread(target=protector_server).start()
         app.run()
 
     return start_server
 
-cap = cv2.VideoCapture("videos/sample.mp4")
-start = server(cap)
+# cap = cv2.VideoCapture("videos/sample.mp4")
+start = server()
 
 start()
