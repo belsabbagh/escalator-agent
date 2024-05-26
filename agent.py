@@ -5,10 +5,13 @@ import sys
 import threading
 import math
 import flask
+import pygame
+import time
 from sort import Sort
 from PyQt6 import QtCore, QtGui, QtWidgets
 
-
+pygame.mixer.init()
+alert = pygame.mixer.Sound('assets/beep-warning-6387.mp3')
 
 def is_in_limits(limits, cx, cy, k=15):
     x1, y1, x2, y2 = limits
@@ -34,8 +37,10 @@ def count_people(img, mask, model, tracker):
 
 
 def gate_action(gate_closed, count, max_count, soft_limit):
-    if count > max_count:
+    if count > max_count and not gate_closed:
         # close gate
+        alert.play()
+        time.sleep(1)
         print("CLOSING GATE")
         return True
     if gate_closed and (count < soft_limit):
@@ -85,8 +90,15 @@ def escalator_controller(
         count = len(people)
         gate_closed = gate_action(gate_closed, count, max_count, soft_limit)
         if (not gate_closed) and (count >= soft_limit):
-            # sound alarm
-            print("ALARM")
+            cv2.putText(
+                img,
+                f"Remaining: {max_count - count}",
+                (420, 70),
+                1,
+                2,
+                (50, 50, 230),
+                3,
+            )
         cv2.putText(
             img,
             f"Count: {count}",
