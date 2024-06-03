@@ -180,9 +180,9 @@ if __name__ == "__main__":
     app = QtWidgets.QApplication([])
 
     # Capture a single frame from the video stream
-    stream = cv2.VideoCapture("videos/sample.mp4")
+    stream = cv2.VideoCapture("http://192.168.64.254:4747/video")
     ret, frame = stream.read()
-    
+
     if not ret:
         print("Failed to capture image")
         sys.exit(1)
