@@ -182,18 +182,23 @@ class MainWindow(QtWidgets.QMainWindow):
 
 
 if __name__ == "__main__":
-    app = QtWidgets.QApplication([])
+    # The first argument in sys.argv is the script name itself.
+    # We expect the video source to be the second argument (index 1).
+    if len(sys.argv) < 2:
+        print("Usage: python your_script_name.py <video_source>")
+        print("Example: python your_script_name.py videos/sample.mp4")
+        sys.exit(1)
 
-    # Capture a single frame from the video stream
-    stream = cv2.VideoCapture(
-        "videos/sample.mp4"
-    )  # cv2.VideoCapture("http://192.168.64.254:4747/video")
+    # Get the video source from the command-line arguments
+    video_source = sys.argv[1]
+    print(f"Using video source: {video_source}")
+    stream = cv2.VideoCapture(video_source)
     ret, frame = stream.read()
 
     if not ret:
         print("Failed to capture image")
         sys.exit(1)
-
+    app = QtWidgets.QApplication([])
     main_window = MainWindow(frame)
     main_window.show()
     sys.exit(app.exec())
